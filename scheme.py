@@ -36,7 +36,7 @@ def scheme_eval(expr, env):
     # Evaluate Combinations
     if (scheme_symbolp(first) # first might be unhashable
         and first in LOGIC_FORMS):
-        return scheme_eval(LOGIC_FORMS[first](rest, env), env)
+        return LOGIC_FORMS[first](rest, env)
     elif first == "lambda":
         return do_lambda_form(rest, env)
     elif first == "mu":
@@ -59,9 +59,11 @@ def scheme_apply(procedure, args, env):
     if isinstance(procedure, PrimitiveProcedure):
         return apply_primitive(procedure, args, env)
     elif isinstance(procedure, LambdaProcedure):
-        "*** YOUR CODE HERE ***"
+        return scheme_eval(procedure.body,
+                           procedure.env.make_call_frame(procedure.formals, args))
     elif isinstance(procedure, MuProcedure):
-        "*** YOUR CODE HERE ***"
+        return scheme_eval(procedure.body,
+                           env.make_call_frame(procedure.formals, args))
     else:
         raise SchemeError("Cannot call {0}".format(str(procedure)))
 
@@ -134,7 +136,15 @@ class Frame:
         <{a: 1, b: 2, c: 3} -> <Global Frame>>
         """
         frame = Frame(self)
-        "*** YOUR CODE HERE ***"
+        while formals is not nil and vals is not nil:
+            if not isinstance(formals, Pair) or not scheme_symbolp(formals.first):
+                raise SchemeError("non-symbol: {0}".format(formals))
+            frame.define(formals.first, vals.first)
+            formals, vals = formals.second, vals.second
+        if formals is not nil:
+            raise SchemeError("too few arguments")
+        if vals is not nil:
+            raise SchemeError("too many arguments")
         return frame
 
     def define(self, sym, val):
@@ -193,19 +203,30 @@ class MuProcedure:
 # Special forms #
 #################
 
+def do_body_form(body):
+    """Return the expression evaluated for a procedure body BODY.
+
+    A body consisting of a single expression is returned as-is. A body with
+    several expressions is wrapped in a begin form, so that all of them are
+    evaluated in order and the value of the last one is returned.
+    """
+    if body.second is nil:
+        return body.first
+    return Pair('begin', body)
+
 def do_lambda_form(vals, env):
     """Evaluate a lambda form with parameters VALS in environment ENV."""
     check_form(vals, 2)
     formals = vals[0]
     check_formals(formals)
-    "*** YOUR CODE HERE ***"
+    return LambdaProcedure(formals, do_body_form(vals.second), env)
 
 def do_mu_form(vals):
     """Evaluate a mu form with parameters VALS."""
     check_form(vals, 2)
     formals = vals[0]
     check_formals(formals)
-    "*** YOUR CODE HERE ***"
+    return MuProcedure(formals, do_body_form(vals.second))
 
 def do_define_form(vals, env):
     """Evaluate a define form with parameters VALS in environment ENV."""
@@ -228,8 +249,6 @@ def do_define_form(vals, env):
 def do_quote_form(vals):
     """Evaluate a quote form with parameters VALS."""
     check_form(vals, 1, 1)
-    "*** YOUR CODE HERE ***"
-    check_form(vals, 1, 1)
     return vals[0]
 
 
@@ -243,7 +262,13 @@ def do_let_form(vals, env):
 
     # Add a frame containing bindings
     names, values = nil, nil
-    "*** YOUR CODE HERE ***"
+    remaining = bindings
+    while remaining is not nil:
+        binding = remaining.first
+        check_form(binding, 2, 2)
+        names = Pair(binding.first, names)
+        values = Pair(scheme_eval(binding.second.first, env), values)
+        remaining = remaining.second
     new_env = env.make_call_frame(names, values)
 
     # Evaluate all but the last expression after bindings, and return the last
@@ -260,11 +285,23 @@ def do_let_form(vals, env):
 def do_if_form(vals, env):
     """Evaluate if form with parameters VALS in environment ENV."""
     check_form(vals, 2, 3)
-    "*** YOUR CODE HERE ***"
+    if scheme_true(scheme_eval(vals[0], env)):
+        return scheme_eval(vals[1], env)
+    elif len(vals) == 3:
+        return scheme_eval(vals[2], env)
+    else:
+        return okay
 
 def do_and_form(vals, env):
     """Evaluate short-circuited and with parameters VALS in environment ENV."""
-    "*** YOUR CODE HERE ***"
+    if vals is nil:
+        return True
+    while vals.second is not nil:
+        result = scheme_eval(vals.first, env)
+        if scheme_false(result):
+            return result
+        vals = vals.second
+    return scheme_eval(vals.first, env)
 
 def quote(value):
     """Return a Scheme expression quoting the Scheme VALUE.
@@ -279,7 +316,14 @@ def quote(value):
 
 def do_or_form(vals, env):
     """Evaluate short-circuited or with parameters VALS in environment ENV."""
-    "*** YOUR CODE HERE ***"
+    if vals is nil:
+        return False
+    while vals.second is not nil:
+        result = scheme_eval(vals.first, env)
+        if scheme_true(result):
+            return result
+        vals = vals.second
+    return scheme_eval(vals.first, env)
 
 def do_cond_form(vals, env):
     """Evaluate cond form with parameters VALS in environment ENV."""
@@ -295,13 +339,19 @@ def do_cond_form(vals, env):
         else:
             test = scheme_eval(clause.first, env)
         if scheme_true(test):
-            "*** YOUR CODE HERE ***"
+            if clause.second is nil:
+                return test
+            return do_begin_form(clause.second, env)
     return okay
 
 def do_begin_form(vals, env):
     """Evaluate begin form with parameters VALS in environment ENV."""
     check_form(vals, 1)
-    "*** YOUR CODE HERE ***"
+    result = None
+    while vals is not nil:
+        result = scheme_eval(vals.first, env)
+        vals = vals.second
+    return result
 
 LOGIC_FORMS = {
         "and": do_and_form,
@@ -332,7 +382,17 @@ def check_formals(formals):
 
     >>> check_formals(read_line("(a b c)"))
     """
-    "*** YOUR CODE HERE ***"
+    seen = []
+    while formals is not nil:
+        if not isinstance(formals, Pair):
+            raise SchemeError("bad formal list: {0}".format(formals))
+        symbol = formals.first
+        if not scheme_symbolp(symbol):
+            raise SchemeError("non-symbol: {0}".format(symbol))
+        if symbol in seen:
+            raise SchemeError("duplicate symbol: {0}".format(symbol))
+        seen.append(symbol)
+        formals = formals.second
 
 ##################
 # Tail Recursion #
@@ -358,7 +418,65 @@ def scheme_optimized_eval(expr, env):
         # Evaluate Combinations
         if (scheme_symbolp(first) # first might be unhashable
             and first in LOGIC_FORMS):
-            "*** YOUR CODE HERE ***"
+            # The value of the last subexpression is evaluated in the tail
+            # position, so it becomes the new EXPR instead of a recursive call.
+            if first == "if":
+                check_form(rest, 2, 3)
+                if scheme_true(scheme_eval(rest[0], env)):
+                    expr = rest[1]
+                elif len(rest) == 3:
+                    expr = rest[2]
+                else:
+                    return okay
+            elif first == "and":
+                if rest is nil:
+                    return True
+                while rest.second is not nil:
+                    result = scheme_eval(rest.first, env)
+                    if scheme_false(result):
+                        return result
+                    rest = rest.second
+                expr = rest.first
+            elif first == "or":
+                if rest is nil:
+                    return False
+                while rest.second is not nil:
+                    result = scheme_eval(rest.first, env)
+                    if scheme_true(result):
+                        return result
+                    rest = rest.second
+                expr = rest.first
+            elif first == "cond":
+                num_clauses = len(rest)
+                matched = False
+                for i, clause in enumerate(rest):
+                    check_form(clause, 1)
+                    if clause.first == "else":
+                        if i < num_clauses-1:
+                            raise SchemeError("else must be last")
+                        test = True
+                        if clause.second is nil:
+                            raise SchemeError("badly formed else clause")
+                    else:
+                        test = scheme_eval(clause.first, env)
+                    if scheme_true(test):
+                        if clause.second is nil:
+                            return test
+                        body = clause.second
+                        while body.second is not nil:
+                            scheme_eval(body.first, env)
+                            body = body.second
+                        expr = body.first
+                        matched = True
+                        break
+                if not matched:
+                    return okay
+            else:  # begin
+                check_form(rest, 1)
+                while rest.second is not nil:
+                    scheme_eval(rest.first, env)
+                    rest = rest.second
+                expr = rest.first
         elif first == "lambda":
             return do_lambda_form(rest, env)
         elif first == "mu":
@@ -368,14 +486,23 @@ def scheme_optimized_eval(expr, env):
         elif first == "quote":
             return do_quote_form(rest)
         elif first == "let":
-            "*** YOUR CODE HERE ***"
+            expr, env = do_let_form(rest, env)
         else:
-            "*** YOUR CODE HERE ***"
+            procedure = scheme_eval(first, env)
+            args = rest.map(lambda operand: scheme_eval(operand, env))
+            if isinstance(procedure, PrimitiveProcedure):
+                return apply_primitive(procedure, args, env)
+            elif isinstance(procedure, LambdaProcedure):
+                expr, env = procedure.body, procedure.env.make_call_frame(procedure.formals, args)
+            elif isinstance(procedure, MuProcedure):
+                expr, env = procedure.body, env.make_call_frame(procedure.formals, args)
+            else:
+                raise SchemeError("Cannot call {0}".format(str(procedure)))
 
 ################################################################
 # Uncomment the following line to apply tail call optimization #
 ################################################################
-# scheme_eval = scheme_optimized_eval
+scheme_eval = scheme_optimized_eval
 
 
 ################

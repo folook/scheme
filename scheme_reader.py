@@ -173,7 +173,7 @@ def read_tail(src):
             first = scheme_read(src)  # 继续读后面的token
             second = read_tail(src)
             if second is not nil:
-                raise SyntaxError("unexpected ')' after '.'")
+                raise SyntaxError("Expected one element after .")
             return first
         else:  # 左括号后是普通数字和字母
             # BEGIN PROBLEM 1
